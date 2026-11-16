@@ -470,7 +470,7 @@ def draw_map(points_markers=None, all_path_coords=None):
 # ---------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------
-st.title("🚖 タクシー料金計算アプリ (Routes API 完全統一版)")
+st.title("MKタクシー料金計算アプリ (改良試験版)")
 
 col1, col2 = st.columns(2)
 with col1:
