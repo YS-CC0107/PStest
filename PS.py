@@ -583,7 +583,7 @@ is_disabled = today_count >= DAILY_GLOBAL_LIMIT
 st.caption(f"💡 本日の全体計算状況: あと **{max(0, remaining)}** / {DAILY_GLOBAL_LIMIT} 回 計算可能です")
 
 if is_disabled:
-    st.error("⚠️ 本日の全体利用上限（300回）に達しました。明日（0時以降）に再度お試しください。")
+    st.error("⚠️ 本日の全体利用上限（150回）に達しました。明日（0時以降）に再度お試しください。")
 
 if st.button("料金とルートを計算する", type="primary", disabled=is_disabled):
     if GOOGLE_MAPS_API_KEY == "YOUR_GOOGLE_API_KEY" or not GOOGLE_MAPS_API_KEY:
