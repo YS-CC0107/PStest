@@ -54,7 +54,7 @@ PICKUP_FEE = 300               # 迎車料金 (1乗車目のみ加算)
 DEFAULT_RESERVATION_FEE = 500 # 予約料金 (GeoJSON側で未指定の場合のデフォルト値)
 BRIDGE_FEE = 910               # 橋代往復加算料金
 
-DAILY_GLOBAL_LIMIT = 150      # 1日の利用上限（無料枠5,000回対策として150回に設定）
+DAILY_GLOBAL_LIMIT = 150      # 1日の利用上限（無料枠対策として150回に設定）
 DB_FILE = "usage_counter.db"
 
 # ---------------------------------------------------------
@@ -374,7 +374,7 @@ def get_google_routes_api_toll_fee(origin_lat, origin_lon, dest_lat, dest_lon, v
                 total_toll_cost += int(units)
                 
         return total_toll_cost
-    except Exception:
+    except Exception as e:
         return 0
 
 # ---------------------------------------------------------
@@ -470,7 +470,7 @@ def draw_map(points_markers=None, all_path_coords=None):
 # ---------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------
-st.title("MKタクシー料金計算アプリ (テスト改良版)")
+st.title("🚖 タクシー料金計算アプリ (Routes API 完全統一版)")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -648,6 +648,8 @@ if st.button("料金とルートを計算する", type="primary", disabled=is_di
 
             # 3. 終点座標取得
             e_lat, e_lon = get_coordinates_google(end_point)
+            if e_lon is None and e_lat is None: # 念のため
+                pass
             if e_lat is None:
                 st.error("終点の位置情報が取得できませんでした。")
                 st.stop()
@@ -819,21 +821,22 @@ if st.button("料金とルートを計算する", type="primary", disabled=is_di
                 st.rerun()
 
 # ---------------------------------------------------------
-# 結果表示
+# 結果表示 (KeyError対策として .get() による安全な値取得に変更)
 # ---------------------------------------------------------
 if "calc_result" in st.session_state:
     res = st.session_state["calc_result"]
-    if res.get("error"):
+    if res.get("error", False):
         st.error(f"⛔ {res.get('error_message', '計算に失敗しました。')}")
     else:
         st.success("計算が完了しました！")
         
-        for msg in res["info_messages"]:
+        for msg in res.get("info_messages", []):
             st.info(msg)
-        for msg in res["caption_messages"]:
+        for msg in res.get("caption_messages", []):
             st.caption(msg)
 
-        has_toll = res["total_toll_fee"] > 0
+        total_toll_fee = res.get("total_toll_fee", 0)
+        has_toll = total_toll_fee > 0
         
         fare_label = "タクシー運賃 (迎車・深夜割増込)" if res.get("is_night", False) else "タクシー運賃 (迎車込)"
         fare_detail_label = "タクシー運賃(迎車・深夜割増込)" if res.get("is_night", False) else "タクシー運賃(迎車込)"
@@ -842,29 +845,33 @@ if "calc_result" in st.session_state:
         if res.get("has_bridge_fee", False):
             toll_label += " ※橋代+910円込"
 
+        total_distance = res.get("total_distance", 0.0)
+        taxi_fare = res.get("taxi_fare", 0)
+        grand_total = res.get("grand_total", 0)
+
         if has_toll:
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.metric("総実走行距離", f"{res['total_distance']:.2f} km")
+                st.metric("総実走行距離", f"{total_distance:.2f} km")
             with c2:
-                st.metric(fare_label, f"{res['taxi_fare']:,} 円")
+                st.metric(fare_label, f"{taxi_fare:,} 円")
             with c3:
-                st.metric(toll_label, f"{res['total_toll_fee']:,} 円")
+                st.metric(toll_label, f"{total_toll_fee:,} 円")
             with c4:
-                st.metric("支払総額 (合計)", f"{res['grand_total']:,} 円")
+                st.metric("支払総額 (合計)", f"{grand_total:,} 円")
         else:
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.metric("総実走行距離", f"{res['total_distance']:.2f} km")
+                st.metric("総実走行距離", f"{total_distance:.2f} km")
             with c2:
-                st.metric(fare_label, f"{res['taxi_fare']:,} 円")
+                st.metric(fare_label, f"{taxi_fare:,} 円")
             with c3:
-                st.metric("支払総額 (合計)", f"{res['grand_total']:,} 円")
+                st.metric("支払総額 (合計)", f"{grand_total:,} 円")
 
-        details = [f"{fare_detail_label}: {res['taxi_fare']:,}円"]
-        if res["use_reservation"]:
-            details.append(f"予約料金: {res['applied_res_fee']:,}円")
+        details = [f"{fare_detail_label}: {taxi_fare:,}円"]
+        if res.get("use_reservation", False):
+            details.append(f"予約料金: {res.get('applied_res_fee', 0):,}円")
         if has_toll:
-            details.append(f"{toll_label}: {res['total_toll_fee']:,}円")
+            details.append(f"{toll_label}: {total_toll_fee:,}円")
         
-        st.markdown(f"**【金額内訳】** {' + '.join(details)} ＝ **合計 {res['grand_total']:,}円**")
+        st.markdown(f"**【金額内訳】** {' + '.join(details)} ＝ **合計 {grand_total:,}円**")
