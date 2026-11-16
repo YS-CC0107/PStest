@@ -54,7 +54,7 @@ PICKUP_FEE = 300               # 迎車料金 (1乗車目のみ加算)
 DEFAULT_RESERVATION_FEE = 500 # 予約料金 (GeoJSON側で未指定の場合のデフォルト値)
 BRIDGE_FEE = 910               # 橋代往復加算料金
 
-DAILY_GLOBAL_LIMIT = 150
+DAILY_GLOBAL_LIMIT = 150      # 1日の利用上限（無料枠5,000回対策として150回に設定）
 DB_FILE = "usage_counter.db"
 
 # ---------------------------------------------------------
@@ -235,7 +235,7 @@ def is_in_bridge_area(lat, lon):
     return False
 
 # ---------------------------------------------------------
-# Google Maps API 関数 (Geocoding, Directions, Routes API)
+# Google Maps API 関数 (Geocoding & Routes API 統一版)
 # ---------------------------------------------------------
 def get_coordinates_google(address):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -262,38 +262,58 @@ def reverse_geocode_google(lat, lon):
     except Exception:
         return f"{lat:.5f}, {lon:.5f}"
 
-def get_google_route(origin_lat, origin_lon, dest_lat, dest_lon, avoid_highways=False):
-    """区間距離・ポリライン取得用（Directions API）"""
-    url = "https://maps.googleapis.com/maps/api/directions/json"
-    params = {
-        "origin": f"{origin_lat},{origin_lon}",
-        "destination": f"{dest_lat},{dest_lon}",
-        "mode": "driving",
-        "key": GOOGLE_MAPS_API_KEY,
-        "language": "ja"
+def get_routes_api_leg(origin_lat, origin_lon, dest_lat, dest_lon, avoid_highways=False):
+    """Routes API を使用して区間距離・ポリラインを取得する関数"""
+    url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+        "X-Goog-FieldMask": "routes.distanceMeters,routes.polyline.encodedPolyline"
     }
+    
+    body = {
+        "origin": {
+            "location": {
+                "latLng": {
+                    "latitude": origin_lat,
+                    "longitude": origin_lon
+                }
+            }
+        },
+        "destination": {
+            "location": {
+                "latLng": {
+                    "latitude": dest_lat,
+                    "longitude": dest_lon
+                }
+            }
+        },
+        "travelMode": "DRIVE",
+        "routingPreference": "TRAFFIC_UNAWARE"
+    }
+    
     if avoid_highways:
-        params["avoid"] = "tolls"
+        body["routeModifiers"] = {"avoidTolls": True}
 
     try:
-        res = requests.get(url, params=params).json()
-        if res.get("status") != "OK" or not res.get("routes"):
+        res = requests.post(url, headers=headers, json=body).json()
+        if "routes" not in res or len(res["routes"]) == 0:
             return None
 
         route = res["routes"][0]
-        leg = route["legs"][0]
-        distance_km = leg["distance"]["value"] / 1000.0
-        path_coords = polyline.decode(route["overview_polyline"]["points"])
+        distance_km = route.get("distanceMeters", 0) / 1000.0
+        encoded_polyline = route.get("polyline", {}).get("encodedPolyline", "")
+        path_coords = polyline.decode(encoded_polyline) if encoded_polyline else []
 
         return {
             "distance_km": distance_km,
             "path_coords": path_coords
         }
-    except Exception as e:
+    except Exception:
         return None
 
 def get_google_routes_api_toll_fee(origin_lat, origin_lon, dest_lat, dest_lon, via_coords_list=None, avoid_highways=False):
-    """Google Routes API を使用して有料道路料金を取得する関数"""
+    """Routes API を使用して全ルートの有料道路料金を取得する関数"""
     if avoid_highways:
         return 0
 
@@ -354,7 +374,7 @@ def get_google_routes_api_toll_fee(origin_lat, origin_lon, dest_lat, dest_lon, v
                 total_toll_cost += int(units)
                 
         return total_toll_cost
-    except Exception as e:
+    except Exception:
         return 0
 
 # ---------------------------------------------------------
@@ -450,7 +470,7 @@ def draw_map(points_markers=None, all_path_coords=None):
 # ---------------------------------------------------------
 # Streamlit UI
 # ---------------------------------------------------------
-st.title("🚖 タクシー料金計算アプリ (改良版テスト)")
+st.title("MKタクシー料金計算アプリ (テスト改良版)")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -595,7 +615,7 @@ if st.button("料金とルートを計算する", type="primary", disabled=is_di
     else:
         increment_today_usage()
 
-        with st.spinner("Google Maps API でルートと高速料金を計算中..."):
+        with st.spinner("Google Routes API でルートと高速料金を計算中..."):
             avoid_highways = not use_highway
             points = []
             
@@ -654,13 +674,13 @@ if st.button("料金とルートを計算する", type="primary", disabled=is_di
             for pt in points[1:-1]:
                 routes_via_coords.append((pt["lat"], pt["lon"]))
 
-            # 地点間ごとの個別距離を取得 (Directions API)
+            # 地点間ごとの個別距離・ポリラインを取得 (Routes API 使用)
             leg_distances = []
             for i in range(len(points) - 1):
                 p1 = points[i]
                 p2 = points[i + 1]
 
-                route_info = get_google_route(p1["lat"], p1["lon"], p2["lat"], p2["lon"], avoid_highways)
+                route_info = get_routes_api_leg(p1["lat"], p1["lon"], p2["lat"], p2["lon"], avoid_highways)
                 if route_info is None:
                     error_flag = True
                     error_message = f"区間 ({p1['name']} ➔ {p2['name']}) のルートが見つかりませんでした。"
